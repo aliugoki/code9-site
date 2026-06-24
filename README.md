@@ -79,6 +79,51 @@ These are environment fixes only — no design/content was altered:
 If you don't know the password, set a new one:
 `make reset-admin-pass USER=Code-9-Group PASS=YourNewPass`
 
+## CI/CD — automatic deploys
+
+Infra/code changes auto-deploy to this server via **GitHub Actions + a
+self-hosted runner**.
+
+- **Repo:** https://github.com/aliugoki/code9-site (private)
+- **Flow:** `git push origin main` → GitHub Actions → self-hosted runner on this
+  box → `git reset --hard` the live dir to the pushed commit → rebuild image →
+  `docker compose up -d` + force-recreate nginx/wordpress → health-check
+  `http://localhost:8082`.
+- **Workflow:** `.github/workflows/deploy.yml` (also runnable on demand via the
+  Actions tab → "Deploy" → Run workflow, or `gh workflow run deploy.yml`).
+
+### What auto-deploys vs what doesn't
+
+| Change type | Auto-deploys? |
+|---|---|
+| docker-compose, nginx vhost, php ini, Dockerfile, workflow | ✅ yes, on push |
+| Custom code committed to the repo | ✅ yes, on push |
+| WordPress content/design (pages, Elementor, posts, media) | ❌ no — these live in the DB/uploads and take effect instantly in wp-admin; they are not in git |
+
+### Runner as a service (survives reboots)
+
+The runner is registered as `code9-server` (label `code9`). Install it as a
+systemd service once:
+
+```bash
+cd /home/meta/actions-runner
+sudo ./svc.sh install meta
+sudo ./svc.sh start
+sudo ./svc.sh status
+```
+
+Manage later with `sudo ./svc.sh stop|start|status`.
+
+### Typical change workflow
+
+```bash
+cd /home/meta/code9/site
+# edit docker-compose.yml / nginx/ / php/ ...
+git add -A && git commit -m "infra: <what changed>"
+git push origin main          # deploy runs automatically; watch with:
+gh run watch
+```
+
 ## Notes
 
 - RSS feeds return an error on purpose — the original site's "Disable Everything"
