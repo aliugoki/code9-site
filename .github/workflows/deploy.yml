@@ -34,12 +34,11 @@ jobs:
         run: |
           cd "$SITE_DIR"
           docker compose up -d --build --remove-orphans
-          # Apply bind-mounted config changes (nginx vhost / php ini) that don't
-          # by themselves trigger a container recreation.
-          docker compose exec -T nginx nginx -t \
-            && docker compose exec -T nginx nginx -s reload \
-            || docker compose restart nginx
-          docker compose restart wordpress
+          # Force-recreate the app/web containers so single-file bind mounts
+          # (nginx vhost, php ini) re-resolve to the new on-disk inodes that
+          # `git reset` produced. Without this, mounted config changes are
+          # invisible to the running container. --no-deps keeps db/redis up.
+          docker compose up -d --force-recreate --no-deps nginx wordpress
 
       - name: Health check
         run: |
