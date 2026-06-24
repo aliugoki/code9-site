@@ -1,0 +1,86 @@
+name: code9
+
+services:
+  db:
+    image: mariadb:${MARIADB_VERSION}
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: ${MYSQL_DATABASE}
+      MARIADB_USER: ${MYSQL_USER}
+      MARIADB_PASSWORD: ${MYSQL_PASSWORD}
+      MARIADB_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    volumes:
+      - db_data:/var/lib/mysql
+      # *.sql.gz here is auto-imported the first time the DB initialises
+      - ./db:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks: [code9net]
+
+  redis:
+    image: redis:${REDIS_VERSION}
+    restart: unless-stopped
+    command: ["redis-server", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    networks: [code9net]
+
+  wordpress:
+    build:
+      context: ./php
+      args:
+        PHP_WORDPRESS_VERSION: ${PHP_WORDPRESS_VERSION}
+    restart: unless-stopped
+    # Run as the host user so the bind-mounted files stay editable both
+    # inside the container (media uploads, Elementor saves) and on the host.
+    user: "1000:1000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      WORDPRESS_DB_HOST: db:3306
+      WORDPRESS_DB_NAME: ${MYSQL_DATABASE}
+      WORDPRESS_DB_USER: ${MYSQL_USER}
+      WORDPRESS_DB_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - ./wordpress:/var/www/html
+      - ./php/uploads.ini:/usr/local/etc/php/conf.d/zz-uploads.ini:ro
+    networks: [code9net]
+
+  nginx:
+    image: nginx:${NGINX_VERSION}
+    restart: unless-stopped
+    depends_on:
+      - wordpress
+    ports:
+      - "${HTTP_PORT}:80"
+    volumes:
+      - ./wordpress:/var/www/html:ro
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    networks: [code9net]
+
+  # One-off WP-CLI helper: `docker compose run --rm wpcli wp ...`
+  wpcli:
+    image: wordpress:cli-php8.2
+    profiles: ["tools"]
+    user: "33:33"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      WORDPRESS_DB_HOST: db:3306
+      WORDPRESS_DB_NAME: ${MYSQL_DATABASE}
+      WORDPRESS_DB_USER: ${MYSQL_USER}
+      WORDPRESS_DB_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - ./wordpress:/var/www/html
+    networks: [code9net]
+
+volumes:
+  db_data:
+
+networks:
+  code9net:

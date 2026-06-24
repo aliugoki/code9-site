@@ -1,0 +1,54 @@
+name: Deploy
+
+# Auto-deploy to the local server whenever infra/code changes land on main.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Never run two deploys at once.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, code9]
+    env:
+      SITE_DIR: /home/meta/code9/site
+    steps:
+      - name: Sync live deployment to the pushed commit
+        run: |
+          cd "$SITE_DIR"
+          git fetch origin --prune
+          # Only tracked (infra/code) files move; wordpress/, db/, .env, backups
+          # are git-ignored and left completely untouched.
+          git reset --hard "${{ github.sha }}"
+
+      - name: Validate compose config
+        run: |
+          cd "$SITE_DIR"
+          docker compose config >/dev/null
+
+      - name: Build & start containers
+        run: |
+          cd "$SITE_DIR"
+          docker compose up -d --build --remove-orphans
+
+      - name: Health check
+        run: |
+          cd "$SITE_DIR"
+          for i in $(seq 1 40); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8082/ || true)
+            echo "attempt $i: HTTP $code"
+            if [ "$code" = "200" ]; then echo "Site healthy."; exit 0; fi
+            sleep 3
+          done
+          echo "::error::Health check failed"
+          docker compose ps
+          docker compose logs --tail=80
+          exit 1
+
+      - name: Prune dangling images
+        if: always()
+        run: docker image prune -f
