@@ -34,6 +34,12 @@ jobs:
         run: |
           cd "$SITE_DIR"
           docker compose up -d --build --remove-orphans
+          # Apply bind-mounted config changes (nginx vhost / php ini) that don't
+          # by themselves trigger a container recreation.
+          docker compose exec -T nginx nginx -t \
+            && docker compose exec -T nginx nginx -s reload \
+            || docker compose restart nginx
+          docker compose restart wordpress
 
       - name: Health check
         run: |
